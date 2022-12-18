@@ -682,6 +682,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * never be used in index calculations because of table bounds.
      */
     static final int spread(int h) {
+        //降低了碰撞几率并且保证hash >= 0
         return (h ^ (h >>> 16)) & HASH_BITS;
     }
 
@@ -1014,18 +1015,24 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         for (Node<K,V>[] tab = table;;) {
             Node<K,V> f; int n, i, fh;
             if (tab == null || (n = tab.length) == 0)
+                //初始化哈希表
                 tab = initTable();
+            // (n - 1) & hash 计算出数组下标
             else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+                //若该位置为null，则cas插入
                 if (casTabAt(tab, i, null,
                              new Node<K,V>(hash, key, value, null)))
                     break;                   // no lock when adding to empty bin
             }
             else if ((fh = f.hash) == MOVED)
+                //如果处于扩容中，则该线程则一起帮助扩容
                 tab = helpTransfer(tab, f);
             else {
                 V oldVal = null;
+                //用槽的第一个Node作为锁对象
                 synchronized (f) {
                     if (tabAt(tab, i) == f) {
+                        //红黑树有一个哨兵节点，hash值为-2，如果fh>0说明是链表
                         if (fh >= 0) {
                             binCount = 1;
                             for (Node<K,V> e = f;; ++binCount) {
@@ -1049,6 +1056,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                         else if (f instanceof TreeBin) {
                             Node<K,V> p;
                             binCount = 2;
+                            //使用红黑树的put方法
                             if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
                                                            value)) != null) {
                                 oldVal = p.val;
@@ -1059,6 +1067,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     }
                 }
                 if (binCount != 0) {
+                    //判断是否需要转变为树
                     if (binCount >= TREEIFY_THRESHOLD)
                         treeifyBin(tab, i);
                     if (oldVal != null)
@@ -1067,6 +1076,8 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                 }
             }
         }
+
+        //两个功能：增加个数，检测是否需要扩容
         addCount(1L, binCount);
         return null;
     }
@@ -2224,6 +2235,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         Node<K,V>[] tab; int sc;
         while ((tab = table) == null || tab.length == 0) {
             if ((sc = sizeCtl) < 0)
+                //只允许一个线程执行初始化哈希表操作，其他线程旋转等待
                 Thread.yield(); // lost initialization race; just spin
             else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
                 try {
@@ -2301,9 +2313,16 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
             int rs = resizeStamp(tab.length);
             while (nextTab == nextTable && table == tab &&
                    (sc = sizeCtl) < 0) {
+                //1，校验标识，resizeStamp的参数大小不变则值相等
+                //2，sc == rs + 1 说明最后一个扩容线程正在执行收尾工作，你没必要来帮忙了。
+                //3，sc == rs + MAX_RESIZERS 说明扩容线程数超过最大值
+                //4，transferIndex <= 0在上面分析过，扩容中transferIndex表示最近一个被分配的stride区域的下边界，
+                //    <=0代表数组被分配完了
                 if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
                     sc == rs + MAX_RESIZERS || transferIndex <= 0)
                     break;
+                //cas配合while循环构成自旋CAS，是线程安全的保证。将sizeCtl+1，
+                //sizeCtl此时的低16位为N=扩容线程数+1
                 if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1)) {
                     transfer(tab, nextTab);
                     break;
@@ -2394,6 +2413,8 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     i = -1;
                     advance = false;
                 }
+                //运行到这里则代表table数组中还有未分配的区域，CAS将transferIndex置为新区域的下边界，
+                //得到该区域的边界bound与开始位置i
                 else if (U.compareAndSwapInt
                          (this, TRANSFERINDEX, nextIndex,
                           nextBound = (nextIndex > stride ?
