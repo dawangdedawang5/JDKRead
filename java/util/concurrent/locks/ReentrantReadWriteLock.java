@@ -402,6 +402,8 @@ public class ReentrantReadWriteLock
                 setState(c + acquires);
                 return true;
             }
+            // 队列中没有其他线程在等待锁，而且CAS把state设置成入参的值成功，这里是1（这里的CAS就是我
+            // 们前文提的并发竞争机制），则当前线程获取锁成功并将owner线程设置为当前线程
             if (writerShouldBlock() ||
                 !compareAndSetState(c, c + acquires))
                 return false;

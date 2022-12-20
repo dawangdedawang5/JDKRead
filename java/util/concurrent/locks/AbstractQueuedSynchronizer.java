@@ -581,6 +581,7 @@ public abstract class AbstractQueuedSynchronizer
      * @return node's predecessor
      */
     private Node enq(final Node node) {
+        //CAS"自旋"，直到成功加入队尾
         for (;;) {
             Node t = tail;
             if (t == null) { // Must initialize
@@ -603,16 +604,20 @@ public abstract class AbstractQueuedSynchronizer
      * @return the new node
      */
     private Node addWaiter(Node mode) {
+        //Node结点是对每一个访问同步代码的线程的封装，其包含了需要同步的线程本身以及线程的状态，
+        // 如是否被阻塞，是否等待唤醒，是否已经被取消等
         Node node = new Node(Thread.currentThread(), mode);
-        // Try the fast path of enq; backup to full enq on failure
+        // Try the fast path of enq; backup to full enq on failure 快速判断尾结点是否为空
         Node pred = tail;
         if (pred != null) {
             node.prev = pred;
+            //此时可能有其他线程插入,所以使用CAS重新判断tail
             if (compareAndSetTail(pred, node)) {
                 pred.next = node;
                 return node;
             }
         }
+        //如果tail为空，说明队列还没有初始化，执行enq()
         enq(node);
         return node;
     }
@@ -641,6 +646,7 @@ public abstract class AbstractQueuedSynchronizer
          * to clear in anticipation of signalling.  It is OK if this
          * fails or if status is changed by waiting thread.
          */
+        //用unpark()唤醒等待队列中最前边的那个未放弃线程
         int ws = node.waitStatus;
         if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0);
@@ -651,10 +657,12 @@ public abstract class AbstractQueuedSynchronizer
          * traverse backwards from tail to find the actual
          * non-cancelled successor.
          */
+        //找到下一个需要唤醒的结点s
         Node s = node.next;
         if (s == null || s.waitStatus > 0) {
             s = null;
             for (Node t = tail; t != null && t != node; t = t.prev)
+                //从这里可以看出，<=0的结点，都是还有效的结点。
                 if (t.waitStatus <= 0)
                     s = t;
         }
@@ -855,17 +863,23 @@ public abstract class AbstractQueuedSynchronizer
      * @return {@code true} if interrupted while waiting
      */
     final boolean acquireQueued(final Node node, int arg) {
+        //标记是否成功拿到资源
         boolean failed = true;
         try {
+            //标记等待过程中是否被中断过
             boolean interrupted = false;
             for (;;) {
+                //拿到前驱
                 final Node p = node.predecessor();
+                //先获取 node 对象 prev 节点，如果该节点和 head 相等，
+                // 说明是他的第二个节点，那么此时就可以尝试获取锁了
                 if (p == head && tryAcquire(arg)) {
                     setHead(node);
                     p.next = null; // help GC
                     failed = false;
                     return interrupted;
                 }
+                //将当前线程挂起
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     parkAndCheckInterrupt())
                     interrupted = true;
@@ -1195,6 +1209,9 @@ public abstract class AbstractQueuedSynchronizer
      *        can represent anything you like.
      */
     public final void acquire(int arg) {
+        //tryAcquire由子类实现，作用是抢占资源
+        //让线程处于一种自旋状态，
+        //尝试让该线程重新获取锁!当条件满足获取到了锁则可以从自旋过程中退出，否则继续。
         if (!tryAcquire(arg) &&
             acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
             selfInterrupt();
@@ -1261,6 +1278,7 @@ public abstract class AbstractQueuedSynchronizer
         if (tryRelease(arg)) {
             Node h = head;
             if (h != null && h.waitStatus != 0)
+                //唤醒等待队列中下一个线程
                 unparkSuccessor(h);
             return true;
         }
@@ -1280,6 +1298,8 @@ public abstract class AbstractQueuedSynchronizer
      */
     public final void acquireShared(int arg) {
         if (tryAcquireShared(arg) < 0)
+            //此方法用于将当前线程加入等待队列尾部休息，直到其他线程释放资源唤醒自己，
+            // 自己成功拿到相应量的资源后才返回
             doAcquireShared(arg);
     }
 
