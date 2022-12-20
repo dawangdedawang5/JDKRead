@@ -127,7 +127,9 @@ public class ReentrantLock implements Lock, java.io.Serializable {
          * subclasses, but both need nonfair try for trylock method.
          */
         final boolean nonfairTryAcquire(int acquires) {
+            //调用非公平锁标准获取方法
             final Thread current = Thread.currentThread();
+            //调用AQS中的获取资源方法
             int c = getState();
             if (c == 0) {
                 if (compareAndSetState(0, acquires)) {
@@ -203,13 +205,18 @@ public class ReentrantLock implements Lock, java.io.Serializable {
          * acquire on failure.
          */
         final void lock() {
+            //非公平锁直接抢锁，不管有没有线程排队（用CAS）尝试将state置为1
+            //如果置为1了，在OwnerThread中把当前线程加入在里面。（这种方案和monitor的owner类似）
             if (compareAndSetState(0, 1))
                 setExclusiveOwnerThread(Thread.currentThread());
             else
+                //抢锁失败，进入AQS的标准获取锁流程
+                //这里是AQS，如果下面tryrequire返回true，则又获取到锁了，否则进入阻塞队列。详细请看AQS源码解析。
                 acquire(1);
         }
 
         protected final boolean tryAcquire(int acquires) {
+            //使用AQS提供的获取非公平锁方法获取锁
             return nonfairTryAcquire(acquires);
         }
     }
@@ -229,9 +236,11 @@ public class ReentrantLock implements Lock, java.io.Serializable {
          * recursive call or no waiters or is first.
          */
         protected final boolean tryAcquire(int acquires) {
+            //AQS调用，子类自己实现获取锁的流程
             final Thread current = Thread.currentThread();
             int c = getState();
             if (c == 0) {
+                //这里和非公平锁区别在于：hasQueuedPredecessors看看队列中是否有线程正在排队，没有在通过CAS抢锁。
                 if (!hasQueuedPredecessors() &&
                     compareAndSetState(0, acquires)) {
                     setExclusiveOwnerThread(current);
